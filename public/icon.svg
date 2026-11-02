@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="50%" stop-color="#1e1b4b" />
+      <stop offset="100%" stop-color="#0284c7" />
+    </linearGradient>
+    <linearGradient id="boltGrad" x1="160" y1="120" x2="350" y2="390" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#818cf8" />
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="16" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Base squircle background -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)" />
+
+  <!-- Outer ambient ring -->
+  <circle cx="256" cy="256" r="210" stroke="#38bdf8" stroke-opacity="0.25" stroke-width="3" stroke-dasharray="10 14" />
+  <circle cx="256" cy="256" r="185" stroke="#818cf8" stroke-opacity="0.35" stroke-width="2" />
+
+  <!-- Browser window container -->
+  <rect x="96" y="116" width="320" height="280" rx="28" fill="#0f172a" stroke="#38bdf8" stroke-width="4" stroke-opacity="0.8" />
+  
+  <!-- Window top navigation header -->
+  <path d="M96 144 C96 128.536 108.536 116 124 116 L388 116 C403.464 116 416 128.536 416 144 L416 172 L96 172 Z" fill="#1e293b" />
+  
+  <!-- Traffic dots -->
+  <circle cx="126" cy="144" r="7" fill="#ef4444" />
+  <circle cx="148" cy="144" r="7" fill="#f59e0b" />
+  <circle cx="170" cy="144" r="7" fill="#10b981" />
+
+  <!-- Mini search address bar -->
+  <rect x="194" y="132" width="180" height="24" rx="12" fill="#090d16" stroke="#4f8cff" stroke-width="1.5" />
+  <text x="220" y="148" fill="#93c5fd" font-size="12" font-family="system-ui, sans-serif" font-weight="600">https://ultra-fast</text>
+
+  <!-- Speed lightning / launcher icon inside browser -->
+  <path d="M276 196 L196 304 L248 304 L236 388 L316 280 L264 280 Z" fill="url(#boltGrad)" filter="url(#glow)" />
+</svg>

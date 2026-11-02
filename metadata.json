@@ -1,0 +1,6 @@
+{
+  "name": "Site Opener Superfast PWA",
+  "description": "Ultra superfast site opener, cloud platform domain launcher, and in-app web previewer.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
