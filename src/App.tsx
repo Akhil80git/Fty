@@ -9,6 +9,7 @@ import {
   downloadSiteForOffline,
   deleteSiteSnapshot,
   getAllOfflineUrls,
+  cacheAllLikedSites,
 } from './utils/offlineStorage';
 
 export default function App() {
@@ -24,6 +25,8 @@ export default function App() {
   const [offlineHtml, setOfflineHtml] = useState<string>('');
   const [offlineUrls, setOfflineUrls] = useState<string[]>([]);
   const [hasFailedOnline, setHasFailedOnline] = useState<boolean>(false);
+  const [isCachingAll, setIsCachingAll] = useState<boolean>(false);
+  const [cachingProgress, setCachingProgress] = useState<{ current: number; total: number } | null>(null);
 
   // Liked sites saved and synced in localStorage
   const [likedSites, setLikedSites] = useState<LikedSite[]>(() => {
@@ -38,9 +41,17 @@ export default function App() {
   const inputRef = useRef<HTMLInputElement>(null);
   const frameRef = useRef<HTMLIFrameElement>(null);
 
-  // Load offline urls cache on mount
+  // Load offline urls cache on mount and start background auto-caching of all liked sites
   useEffect(() => {
-    getAllOfflineUrls().then(setOfflineUrls).catch(() => {});
+    getAllOfflineUrls().then((urls) => {
+      setOfflineUrls(urls);
+      // Auto cache any liked sites that are not yet cached
+      if (typeof navigator !== 'undefined' && navigator.onLine && likedSites.length > 0) {
+        cacheAllLikedSites(likedSites).then(() => {
+          getAllOfflineUrls().then(setOfflineUrls).catch(() => {});
+        }).catch(() => {});
+      }
+    }).catch(() => {});
   }, [likedSites]);
 
   // Sync liked sites to localStorage whenever changed
@@ -77,8 +88,12 @@ export default function App() {
   // Listen to network status change
   useEffect(() => {
     const handleOnlineStatus = () => {
-      // Refresh offline urls
       getAllOfflineUrls().then(setOfflineUrls).catch(() => {});
+      if (navigator.onLine && likedSites.length > 0) {
+        cacheAllLikedSites(likedSites).then(() => {
+          getAllOfflineUrls().then(setOfflineUrls).catch(() => {});
+        }).catch(() => {});
+      }
     };
     window.addEventListener('online', handleOnlineStatus);
     window.addEventListener('offline', handleOnlineStatus);
@@ -86,9 +101,9 @@ export default function App() {
       window.removeEventListener('online', handleOnlineStatus);
       window.removeEventListener('offline', handleOnlineStatus);
     };
-  }, []);
+  }, [likedSites]);
 
-  const openSite = async (raw: string, platKey: string = platform) => {
+  const openSite = async (raw: string, platKey: string = platform, forceOffline = false) => {
     const url = toUrl(raw, platKey);
     if (!url) {
       inputRef.current?.focus();
@@ -111,12 +126,21 @@ export default function App() {
 
     inputRef.current?.blur();
 
-    // Check if device is offline (data is OFF)
-    if (!navigator.onLine) {
-      const snapshot = await getSiteSnapshot(url);
+    // Check if offline snapshot exists for this site
+    const snapshot = await getSiteSnapshot(url);
+
+    // If device is offline (data is OFF) or forceOffline is requested:
+    if (!navigator.onLine || forceOffline) {
       if (snapshot && snapshot.html) {
         setOfflineHtml(snapshot.html);
         setIsOfflineSnapshotLoaded(true);
+        setProgressWidth(100);
+        setTimeout(() => setProgressWidth(0), 300);
+        return;
+      } else {
+        // Site not yet cached
+        setIsOfflineSnapshotLoaded(false);
+        setHasFailedOnline(true);
         setProgressWidth(100);
         setTimeout(() => setProgressWidth(0), 300);
         return;
@@ -127,14 +151,12 @@ export default function App() {
     setIsOfflineSnapshotLoaded(false);
     setOfflineHtml('');
 
-    // If online, silently ensure offline snapshot is updated for future offline use
-    if (navigator.onLine) {
-      downloadSiteForOffline(url, host, platKey).then((saved) => {
-        if (saved) {
-          getAllOfflineUrls().then(setOfflineUrls).catch(() => {});
-        }
-      }).catch(() => {});
-    }
+    // If online, silently update offline snapshot so it is ready for when data is off
+    downloadSiteForOffline(url, host, platKey).then((saved) => {
+      if (saved) {
+        getAllOfflineUrls().then(setOfflineUrls).catch(() => {});
+      }
+    }).catch(() => {});
   };
 
   const handleFrameLoad = () => {
@@ -224,7 +246,9 @@ export default function App() {
   const handleSelectLikedSite = async (site: LikedSite) => {
     setSiteQuery(site.query);
     setPlatform(site.platform);
-    await openSite(site.query, site.platform);
+    // If offline, force offline snapshot load immediately
+    const forceOffline = !navigator.onLine;
+    await openSite(site.query, site.platform, forceOffline);
     setShowLikedModal(false);
   };
 
@@ -250,6 +274,21 @@ export default function App() {
     if (saved) {
       setOfflineUrls((prev) => [...prev, site.url]);
     }
+  };
+
+  const handleCacheAllOffline = async () => {
+    if (isCachingAll || !navigator.onLine) return;
+    setIsCachingAll(true);
+    setCachingProgress({ current: 0, total: likedSites.length });
+
+    await cacheAllLikedSites(likedSites, (current, total) => {
+      setCachingProgress({ current, total });
+    });
+
+    const updated = await getAllOfflineUrls();
+    setOfflineUrls(updated);
+    setIsCachingAll(false);
+    setCachingProgress(null);
   };
 
   const currentPlatformObj = PLATFORMS.find((p) => p.key === platform) || PLATFORMS[0];
@@ -299,7 +338,7 @@ export default function App() {
           </select>
         </div>
 
-        {/* Top Nav Like History Button */}
+        {/* Top Nav Like History Button with Offline status indicator */}
         <button
           onClick={() => setShowLikedModal(true)}
           className={`h-10 px-2.5 flex items-center justify-center gap-1.5 rounded-xl border transition active:scale-95 flex-none ${
@@ -307,12 +346,15 @@ export default function App() {
               ? 'bg-[#0f1115] hover:bg-[#262b36] text-red-400 border-[#262b36]'
               : 'bg-[#0f1115] hover:bg-[#262b36] text-slate-400 border-[#262b36]'
           }`}
-          title="Liked Sites History dekhein"
+          title="Liked Sites History (Offline Storage) dekhein"
         >
           <Heart className={`w-4 h-4 ${likedSites.length > 0 ? 'fill-red-500 text-red-500' : ''}`} />
           {likedSites.length > 0 && (
-            <span className="text-xs font-bold text-white font-mono bg-red-500/20 px-1.5 py-0.5 rounded-md border border-red-500/30">
-              {likedSites.length}
+            <span className="text-xs font-bold text-white font-mono bg-red-500/20 px-1.5 py-0.5 rounded-md border border-red-500/30 flex items-center gap-1">
+              <span>{likedSites.length}</span>
+              {offlineUrls.length > 0 && (
+                <Zap className="w-2.5 h-2.5 fill-emerald-400 text-emerald-400 inline" />
+              )}
             </span>
           )}
         </button>
@@ -330,7 +372,7 @@ export default function App() {
         <PWAInstallButton compact={true} />
       </header>
 
-      {/* Main Stage: 100% Clean */}
+      {/* Main Stage */}
       <main className="flex-1 relative w-full h-[calc(100vh-56px)] bg-[#0f1115] overflow-hidden">
         {/* Animated Progress Bar */}
         <div
@@ -340,19 +382,19 @@ export default function App() {
 
         {/* Offline indicator banner when rendering cached snapshot */}
         {isOfflineSnapshotLoaded && (
-          <div className="absolute top-0 left-0 right-0 z-30 bg-emerald-950/90 border-b border-emerald-500/40 text-emerald-300 text-xs py-1 px-3 flex items-center justify-between backdrop-blur-md">
-            <div className="flex items-center gap-1.5">
-              <Zap className="w-3.5 h-3.5 fill-emerald-400 text-emerald-400" />
-              <span>
-                <strong>Offline Mode:</strong> Deta band hone par bhi saved copy khuli hai.
+          <div className="absolute top-0 left-0 right-0 z-30 bg-emerald-950/95 border-b border-emerald-500/50 text-emerald-300 text-xs py-1.5 px-3 flex items-center justify-between backdrop-blur-md shadow-md">
+            <div className="flex items-center gap-2">
+              <Zap className="w-4 h-4 fill-emerald-400 text-emerald-400" />
+              <span className="font-medium">
+                <strong>Offline Mode Active:</strong> Deta band hai, saved copy chal rahi hai.
               </span>
             </div>
             {navigator.onLine && (
               <button
-                onClick={() => openSite(siteQuery, platform)}
-                className="text-[11px] bg-emerald-500/20 hover:bg-emerald-500/30 px-2 py-0.5 rounded text-emerald-200 border border-emerald-500/30 font-semibold"
+                onClick={() => openSite(siteQuery, platform, false)}
+                className="text-[11px] bg-emerald-500/20 hover:bg-emerald-500/30 px-2.5 py-0.5 rounded text-emerald-200 border border-emerald-500/30 font-semibold transition"
               >
-                Live Reload Karein
+                Live Switch Karein
               </button>
             )}
           </div>
@@ -386,15 +428,15 @@ export default function App() {
           <div className="w-full h-full bg-[#0f1115]" />
         )}
 
-        {/* Offline fallback prompt if live site failed and snapshot exists */}
+        {/* Offline fallback prompt if live site failed and snapshot exists or doesn't */}
         {hasFailedOnline && (
-          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-[#0f1115]/90 p-4 text-center">
-            <WifiOff className="w-10 h-10 text-amber-400 mb-2" />
-            <h3 className="text-base font-bold text-white mb-1">Deta Band Hai Ya Internet Nahi Hai</h3>
+          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-[#0f1115]/95 p-4 text-center">
+            <WifiOff className="w-12 h-12 text-amber-400 mb-3 animate-pulse" />
+            <h3 className="text-base font-bold text-white mb-1">Deta Band Hai</h3>
             <p className="text-xs text-slate-400 max-w-sm mb-4">
-              Is site ka live connection nahi mila.
+              Internet connection nahi hai.
             </p>
-            {offlineUrls.includes(currentUrl) && (
+            {offlineUrls.includes(currentUrl) ? (
               <button
                 onClick={async () => {
                   const snap = await getSiteSnapshot(currentUrl);
@@ -404,11 +446,15 @@ export default function App() {
                     setHasFailedOnline(false);
                   }
                 }}
-                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs flex items-center gap-2 shadow-lg"
+                className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs flex items-center gap-2 shadow-lg transition active:scale-95"
               >
                 <Zap className="w-4 h-4 fill-white" />
                 Offline Saved Copy Kholein
               </button>
+            ) : (
+              <div className="bg-slate-900 border border-slate-800 p-3 rounded-xl max-w-sm text-xs text-slate-300">
+                Is site ka offline snapshot save nahi hua tha. Jab internet on ho, tab ek baar Like (❤️) karein taaki ye hamesha ke liye offline save ho jaye.
+              </div>
             )}
           </div>
         )}
@@ -422,6 +468,9 @@ export default function App() {
             onRemoveSite={handleRemoveLikedSite}
             onClearAll={handleClearAllLiked}
             onDownloadOffline={handleDownloadOfflineSite}
+            onCacheAllOffline={handleCacheAllOffline}
+            isCachingAll={isCachingAll}
+            cachingProgress={cachingProgress}
             onClose={() => setShowLikedModal(false)}
           />
         )}

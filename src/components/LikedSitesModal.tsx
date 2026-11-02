@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Heart, Search, ExternalLink, Trash2, X, Globe, RotateCw, Zap, Download } from 'lucide-react';
+import { Heart, Search, ExternalLink, Trash2, X, Globe, RotateCw, Zap, Download, CheckCircle2 } from 'lucide-react';
 
 export interface LikedSite {
   id: string;
@@ -16,7 +16,10 @@ interface LikedSitesModalProps {
   onSelectSite: (site: LikedSite) => void;
   onRemoveSite: (id: string) => void;
   onClearAll: () => void;
-  onDownloadOffline: (site: LikedSite) => void;
+  onDownloadOffline: (site: LikedSite) => Promise<void>;
+  onCacheAllOffline: () => Promise<void>;
+  isCachingAll: boolean;
+  cachingProgress: { current: number; total: number } | null;
   onClose: () => void;
 }
 
@@ -27,6 +30,9 @@ export const LikedSitesModal: React.FC<LikedSitesModalProps> = ({
   onRemoveSite,
   onClearAll,
   onDownloadOffline,
+  onCacheAllOffline,
+  isCachingAll,
+  cachingProgress,
   onClose,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -43,12 +49,14 @@ export const LikedSitesModal: React.FC<LikedSitesModalProps> = ({
     );
   }, [likedSites, searchTerm]);
 
-  const handleDownload = async (e: React.MouseEvent, site: LikedSite) => {
+  const handleDownloadSingle = async (e: React.MouseEvent, site: LikedSite) => {
     e.stopPropagation();
     setCachingUrl(site.url);
     await onDownloadOffline(site);
     setCachingUrl(null);
   };
+
+  const uncachedCount = likedSites.filter((s) => !offlineUrls.includes(s.url)).length;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-3 sm:p-5 animate-in fade-in duration-150">
@@ -70,7 +78,7 @@ export const LikedSitesModal: React.FC<LikedSitesModalProps> = ({
                 </span>
               </div>
               <span className="text-[11px] text-slate-400">
-                Kul {likedSites.length} site(s) saved ({offlineUrls.length} offline ready)
+                Kul {likedSites.length} sites ({offlineUrls.length} offline ready)
               </span>
             </div>
           </div>
@@ -99,6 +107,37 @@ export const LikedSitesModal: React.FC<LikedSitesModalProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Batch Offline Download Bar if any site needs caching */}
+        {likedSites.length > 0 && uncachedCount > 0 && (
+          <div className="px-4 py-2 bg-emerald-950/40 border-b border-emerald-500/30 flex items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-1.5 text-emerald-300">
+              <Download className="w-3.5 h-3.5" />
+              <span>
+                {uncachedCount} sites abhi offline ke liye bachi hain
+              </span>
+            </div>
+            <button
+              onClick={onCacheAllOffline}
+              disabled={isCachingAll}
+              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-800 text-white font-semibold rounded-lg transition flex items-center gap-1 text-[11px]"
+            >
+              {isCachingAll ? (
+                <>
+                  <RotateCw className="w-3 h-3 animate-spin" />
+                  <span>
+                    Saving {cachingProgress ? `${cachingProgress.current}/${cachingProgress.total}` : '...'}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <Zap className="w-3 h-3 fill-white" />
+                  <span>Sabhi Ko Offline Save Karein</span>
+                </>
+              )}
+            </button>
+          </div>
+        )}
 
         {/* Search filter for large lists (60-300+ sites) */}
         {likedSites.length > 3 && (
@@ -168,12 +207,12 @@ export const LikedSitesModal: React.FC<LikedSitesModalProps> = ({
                       {/* Offline Ready Badge */}
                       {isOfflineReady ? (
                         <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-0.5 flex-none">
-                          <Zap className="w-2.5 h-2.5 fill-emerald-400" />
+                          <CheckCircle2 className="w-2.5 h-2.5 text-emerald-400" />
                           Offline Ready
                         </span>
                       ) : (
-                        <span className="text-[10px] text-slate-500 flex-none">
-                          Online only
+                        <span className="text-[10px] text-amber-400 bg-amber-500/10 px-1.5 py-0.2 rounded border border-amber-500/20 flex-none">
+                          Save Pending
                         </span>
                       )}
                     </div>
@@ -191,7 +230,7 @@ export const LikedSitesModal: React.FC<LikedSitesModalProps> = ({
                     {/* Offline cache button if not cached yet */}
                     {!isOfflineReady && (
                       <button
-                        onClick={(e) => handleDownload(e, site)}
+                        onClick={(e) => handleDownloadSingle(e, site)}
                         disabled={isDownloading}
                         className="p-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/20 transition"
                         title="Deta band ke liye offline save karein"

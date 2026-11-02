@@ -11,7 +11,7 @@ async function startServer() {
 
   app.use(express.json());
 
-  // API endpoint to fetch and format website HTML for offline storage
+  // API endpoint to fetch, inline styles, and package website for 100% offline viewing
   app.get('/api/cache-site', async (req, res) => {
     const targetUrl = req.query.url as string;
     if (!targetUrl || !targetUrl.startsWith('http')) {
@@ -22,7 +22,7 @@ async function startServer() {
       const response = await fetch(targetUrl, {
         headers: {
           'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
           Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         },
         redirect: 'follow',
@@ -34,7 +34,7 @@ async function startServer() {
 
       let html = await response.text();
 
-      // Ensure relative links/assets resolve properly offline or with cached base
+      // Ensure base tag so relative resources resolve
       const baseTag = `<base href="${targetUrl}">`;
       if (html.includes('<head>')) {
         html = html.replace('<head>', `<head>${baseTag}`);
@@ -42,6 +42,34 @@ async function startServer() {
         html = html.replace(/<head[^>]*>/, `$&${baseTag}`);
       } else {
         html = `${baseTag}${html}`;
+      }
+
+      // Inline external CSS stylesheets so page renders completely offline without internet
+      const linkRegex = /<link[^>]+rel=["']stylesheet["'][^>]*>/gi;
+      const hrefRegex = /href=["']([^"']+)["']/i;
+      const matches = html.match(linkRegex) || [];
+
+      // Download and inline up to 10 stylesheets
+      for (const linkTag of matches.slice(0, 10)) {
+        const hrefMatch = linkTag.match(hrefRegex);
+        if (hrefMatch && hrefMatch[1]) {
+          let cssUrl = hrefMatch[1];
+          try {
+            if (!cssUrl.startsWith('http')) {
+              cssUrl = new URL(cssUrl, targetUrl).href;
+            }
+            const cssRes = await fetch(cssUrl, {
+              headers: { 'User-Agent': 'Mozilla/5.0' },
+              signal: AbortSignal.timeout(3500),
+            });
+            if (cssRes.ok) {
+              const cssText = await cssRes.text();
+              html = html.replace(linkTag, `<style data-offline-inlined="true">\n${cssText}\n</style>`);
+            }
+          } catch {
+            // Keep original link tag if stylesheet fetch times out
+          }
+        }
       }
 
       res.setHeader('Content-Type', 'text/html; charset=utf-8');

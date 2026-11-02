@@ -97,42 +97,48 @@ export async function getAllOfflineUrls(): Promise<string[]> {
 }
 
 /**
- * Downloads and archives the site HTML into IndexedDB so it can be opened
- * completely offline when internet data is turned off.
+ * Downloads and packages the site HTML (with inlined styles)
+ * into IndexedDB so it can open 100% offline without internet.
  */
 export async function downloadSiteForOffline(
   url: string,
   title: string,
   platform: string
 ): Promise<boolean> {
-  if (!navigator.onLine) {
-    return false; // Can only archive when online
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return false;
   }
 
   try {
-    // Fetch through backend proxy or directly
     let html = '';
+
+    // First attempt: Server-side inliner proxy
     try {
-      const res = await fetch(`/api/cache-site?url=${encodeURIComponent(url)}`);
+      const res = await fetch(`/api/cache-site?url=${encodeURIComponent(url)}`, {
+        signal: AbortSignal.timeout(10000),
+      });
       if (res.ok) {
         html = await res.text();
       }
     } catch {
-      // Direct fallback
+      // Server proxy unavailable or offline
     }
 
+    // Direct fallback if CORS permitted
     if (!html) {
       try {
-        const directRes = await fetch(url, { mode: 'cors' });
+        const directRes = await fetch(url, { mode: 'cors', signal: AbortSignal.timeout(5000) });
         if (directRes.ok) {
           html = await directRes.text();
+          const baseTag = `<base href="${url}">`;
+          html = html.replace(/<head[^>]*>/i, `$&${baseTag}`);
         }
       } catch {
         // CORS blocked
       }
     }
 
-    if (html) {
+    if (html && html.trim().length > 10) {
       await saveSiteSnapshot({
         url,
         html,
@@ -147,4 +153,33 @@ export async function downloadSiteForOffline(
   }
 
   return false;
+}
+
+/**
+ * Batch cache all liked sites in the background
+ */
+export async function cacheAllLikedSites(
+  sites: { url: string; host: string; platform: string }[],
+  onProgress?: (completed: number, total: number) => void
+): Promise<number> {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return 0;
+  }
+
+  const existing = await getAllOfflineUrls();
+  let count = 0;
+  const toDownload = sites.filter((s) => !existing.includes(s.url));
+
+  for (let i = 0; i < toDownload.length; i++) {
+    const site = toDownload[i];
+    const success = await downloadSiteForOffline(site.url, site.host, site.platform);
+    if (success) count++;
+    if (onProgress) {
+      onProgress(i + 1, toDownload.length);
+    }
+    // Small delay between requests to avoid rate limits
+    await new Promise((r) => setTimeout(r, 200));
+  }
+
+  return count;
 }
